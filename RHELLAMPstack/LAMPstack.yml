@@ -1,0 +1,67 @@
+---
+- hosts: all
+  var_files:
+  - vars.yml
+  
+  pre_tasks:
+  - name: 
+    yum: update_cache=yes
+    
+  handlers:
+  - name: restartApache
+    service: name=httpd state=restarted
+    
+  tasks:
+  - name: get software
+    yum: name={{ item }} state=present
+    with_items:
+    - git
+    - httpd
+    - mariadb
+    - mariadb-server
+    - php
+    - php-mysql
+    - php-bcmath.x86_64
+    - php-cli.x86_64
+    - php-common.x86_64
+    - php-dba.x86_64
+    - php-devel.x86_64
+    - php-embedded.x86_64
+    - php-enchant.x86_64
+    - php-fpm.x86_64
+    - php-gd.x86_64
+
+  - name: disable firwall
+    service:name=firewalld state=stopped
+    
+  - name: start LAMP
+    service: "name= {{item }} state=started enabled=yes"
+    with_items:
+    - mysql
+    - mariadb-server
+
+  - name: enabled Apache reqrite module:
+    apache2_module: name=rewrite state=present
+    notify: restartApache
+    
+  - name: add Apache vhost for Drupal 8 devel
+    template:
+      src: "templates/drupal.dev.conf.j2"
+      dest: "/etc/apache2/sites-available/{{ domain }}.dev.conf
+      owner: root
+      group: root
+      mode: 0644
+    notify: restartApache
+    
+  - name: Symlink Drupal vhost to sites-enabled
+   file:
+     src: "/etc/apache2/sites-available/{{ domain }}.dev.conf"
+     dest: "/etc/apache2/sites-enabled/{{ domain }}.dev.conf"
+     state: link
+   notify: restartApache
+   
+  - name: remove default vhost files
+    file:
+      path: "/etc/apache2/sites-enabled/000-default.conf"
+      state: absent
+    notify: restartApache
