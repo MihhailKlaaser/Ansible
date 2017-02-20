@@ -1,0 +1,44 @@
+---
+- hosts: all
+  vars:
+    node_apps_location: /opt/webserver
+  tasks:
+  - name: Install Remi Repo
+    yum:
+    name: http://rpms.remirepo.net/etnterprise/remi-release-7.rp
+    state: present
+    
+  - name: import Remi GPG key
+    rpm_key:
+      key: "http://rpms.remirepo.net/RPM-GPG-KEY-remi"
+      state: present
+      
+  - name: Install EPEL repo
+    yum: name=elep-release state=present
+    
+  - name: stop firewall
+    service: name=firewalld state=stopped
+    
+  - name: install Node.js and npm
+    yum name=npm state=present enablerepo=epel
+    
+  - name: install forever
+    npm: name=forever global=yes state=present
+    
+  - name: Ensure Node.js app folder exists
+    file: "path={{ node_apps_location }} state=directory"
+    
+  - name: copy Node.js app to server
+    copy: "srcs=app dest={{node_apps_location}}"
+    
+  - name: install app dependancies
+    npm: path= {{ node_apps_location }}/app
+    
+  - name check list of runnign Node.js apps
+    command: forever list
+    register: forever_list
+    changed_when: false
+    
+  - name: start Node.js app
+    command: forever start {{ node_apps_location }}/app/app.js"
+    when: forever_list.stdout.find('{{ node_apps_location }}/app/app.js') == -1
