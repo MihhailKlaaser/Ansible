@@ -1,0 +1,12 @@
+---
+  vars:
+    keypair: BelronAdmin
+    instance_type: t2.micro
+    image: ami-dd9eb6ae
+    region: eu-west-1
+    subnet: subnet-2bc7504f
+    groups: 
+      - sg-47c62e20
+      - sg-fd3ed69a
+    tags:
+      Name: MKTEST
