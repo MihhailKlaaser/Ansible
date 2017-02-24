@@ -1,0 +1,97 @@
+# Creates an EC2 instance. modify vars.yml file for specific instnce settings. default settings are
+# t2.micro, eu-west-1, using lates WIN2012R2 image, subnet AZ1A-PrivateSN1, no public IP, sec groups belprod-management-sg and belprod-infrastructure-sg
+# tag Name - MKTest, shutdown behavior - stop, monitoring no, termination protection - yes
+---
+- hosts: localhost
+  gather_facts: no
+  vars:
+    assign_public_ip: no
+    ebs_optimized: no
+    instance_initiated_shutdown_behavior: stop
+    monitoring: no
+    termination_protection: yes
+    keypair: BelronAdmin
+    instance_type: t2.micro
+    region: eu-west-1
+    subnet: subnet-2bc7504f
+    group:
+      - sg-fd3ed69a
+      - sg-47c62e20
+    tags:
+      Name: MKTEST
+  vars_files:
+    - /etc/ansible/Security/awsauth.yml
+
+  tasks:
+  - name: find current Windows AMI in this region
+    ec2_ami_find:
+      aws_access_key: "{{ access }}"
+      aws_secret_key: "{{ secret }}"
+      region: "{{ region }}"
+      platform: windows
+      virtualization_type: hvm
+      owner: amazon
+      name: Windows_Server-2012-R2_RTM-English-64Bit-Base-*
+      no_result_action: fail
+      sort: name
+      sort_order: descending
+    register: found_amis
+
+  - set_fact:
+      win_ami_id: "{{ (found_amis.results | first).ami_id  }}"
+
+  - name: Lauch EC2 Instance
+    ec2:
+      assign_public_ip: "{{ assign_public_ip }}"
+      ebs_optimized: "{{ ebs_optimized }}"
+      instance_initiated_shutdown_behavior: "{{ instance_initiated_shutdown_behavior }}"
+      termination_protection: "{{ termination_protection }}"
+      aws_access_key: "{{ access }}"
+      aws_secret_key: "{{ secret }}"
+      instance_type: "{{ instance_type }}"
+      image: "{{ win_ami_id }}"
+      region: "{{ region }}"
+      vpc_subnet_id: "{{ subnet }}"
+      group_id: "{{ group }}"
+      instance_tags: "{{ tags }}"
+      user_data: "{{ lookup('template', 'userdata.txt.j2') }}"
+      wait: True
+    register: ec2
+
+  - name: Wait for WinRM on all hosts
+    wait_for:
+      port: 5986
+      host: "{{ (ec2.instances|selectattr('state', 'equalto', 'running')|map(attribute='private_ip')|list).pop() }}"
+      timeout: 600
+      delay: 10
+    with_items: ec2
+
+  - name: Add EC2 hosts to groups
+    add_host:
+      name: "win-temp-{{ (ec2.instances|selectattr('state', 'equalto', 'running')|map(attribute='id')|list).pop() }}"
+      ansible_ssh_host: "{{ (ec2.instances|selectattr('state', 'equalto', 'running')|map(attribute='private_ip')|list).pop() }}"
+      groups: win
+    with_items: ec2
+
+
+
+- name: Change hostname, update DNS settings, join to domain
+  hosts: win
+  vars_files:
+    - /etc/ansible/Security/awsauth.yml
+  gather_facts: no
+  tasks:
+  - name: Copy PS prep scripts
+    win_copy:
+      src: "{{ item.0 }}"
+      dest: "{{ item.1 }}"
+    with_together:
+      - [ 'setup.ps1', 'setup2.ps1' ]
+      - [ 'c:\setup.ps1', 'c:\setup2.ps1' ]
+    retries: 3
+  - name: Configure DNS and hostname
+    win_shell: c:\setup.ps1
+  - pause:
+      minutes: 3
+  - name: Join to domain
+    win_shell: c:\setup2.ps1
